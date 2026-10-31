@@ -1,0 +1,19 @@
+# 构建产物
+firmware/GCC_BUILD/build/
+*.o
+*.elf
+*.bin
+*.map
+
+# Python
+__pycache__/
+*.pyc
+
+# 工具链（不入库，见 README 获取方式）
+arm-gcc/
+STM32F1xx_HAL_Driver/
+CMSIS/
+
+# 系统
+.DS_Store
+Thumbs.db
