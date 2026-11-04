@@ -1,84 +1,112 @@
 # -*- coding: utf-8 -*-
-"""ARM GCC 构建驱动：编译 STM32 固件并生成 .elf/.bin"""
-import subprocess, sys, os, glob
+"""可移植 ARM GCC 构建脚本。
 
-ROOT   = r"E:\rj666\stm32-build"
-GCC    = os.path.join(ROOT, "arm-gcc", "bin", "arm-none-eabi-gcc.exe")
-OBJCOPY= os.path.join(ROOT, "arm-gcc", "bin", "arm-none-eabi-objcopy.exe")
-SIZE   = os.path.join(ROOT, "arm-gcc", "bin", "arm-none-eabi-size.exe")
-CUBE   = os.path.join(ROOT, "STM32F1xx_HAL_Driver")
-CMSIS  = os.path.join(ROOT, "CMSIS")
-BUILD  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "build")
+环境变量：
+  ARM_GCC_BIN   arm-none-eabi 工具链 bin 目录（也可将工具加入 PATH）
+  STM32_HAL_ROOT  STM32F1xx_HAL_Driver 根目录，含 Inc/ 与 Src/
+  CMSIS_ROOT      CMSIS 根目录，含 Device/ 与 Include/
+"""
+import os
+import sys
+import shutil
+import subprocess
+
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.abspath(os.path.join(HERE, "..", ".."))
+CORE = os.path.join(ROOT, "firmware", "Core")
+BUILD = os.path.join(HERE, "build")
 os.makedirs(BUILD, exist_ok=True)
 
-CORE = r"E:\23计科1+202308324143+沈炜丹\毕业设计-STM32智能充电监控显示系统\firmware\Core"
+TOOL_BIN = os.environ.get("ARM_GCC_BIN", "")
+
+def tool(name):
+    candidate = os.path.join(TOOL_BIN, name + (".exe" if os.name == "nt" else "")) if TOOL_BIN else None
+    if candidate and os.path.isfile(candidate):
+        return candidate
+    found = shutil.which(name)
+    if found:
+        return found
+    print(f"[ERROR] 找不到 {name}。请安装 Arm GNU Toolchain，并将其 bin 加入 PATH 或设置 ARM_GCC_BIN。")
+    sys.exit(2)
+
+GCC = tool("arm-none-eabi-gcc")
+OBJCOPY = tool("arm-none-eabi-objcopy")
+SIZE = tool("arm-none-eabi-size")
+HAL = os.environ.get("STM32_HAL_ROOT", os.path.join(ROOT, "Drivers", "STM32F1xx_HAL_Driver"))
+CMSIS = os.environ.get("CMSIS_ROOT", os.path.join(ROOT, "Drivers", "CMSIS"))
+DEVICE = os.path.join(CMSIS, "Device", "ST", "STM32F1xx")
+
+required = [os.path.join(HAL, "Inc"), os.path.join(HAL, "Src"),
+            os.path.join(DEVICE, "Include"), os.path.join(CMSIS, "Include")]
+missing = [p for p in required if not os.path.isdir(p)]
+if missing:
+    print("[ERROR] 缺少 STM32 HAL/CMSIS 依赖目录：")
+    for path in missing:
+        print("  -", path)
+    print("请设置 STM32_HAL_ROOT 与 CMSIS_ROOT，或按 README 放入 Drivers/ 目录。")
+    sys.exit(2)
+
 CPU = ["-mcpu=cortex-m3", "-mthumb", "-DSTM32F103xB", "-DUSE_HAL_DRIVER"]
-CFLAGS = CPU + ["-Os", "-Wall", "-ffreestanding", "-fdata-sections", "-ffunction-sections",
-                "-I", os.path.join(CORE, "Inc"),
-                "-I", os.path.join(CUBE, "Inc"),
-                "-I", os.path.join(CMSIS, "Device", "ST", "STM32F1xx", "Include"),
-                "-I", os.path.join(CMSIS, "Include"),
-                "-I", os.path.dirname(os.path.abspath(__file__))]
-
+CFLAGS = CPU + ["-std=c99", "-Os", "-Wall", "-Wextra", "-ffreestanding",
+    "-fdata-sections", "-ffunction-sections",
+    "-I", os.path.join(CORE, "Inc"), "-I", os.path.join(HAL, "Inc"),
+    "-I", os.path.join(DEVICE, "Include"), "-I", os.path.join(CMSIS, "Include"),
+    "-I", HERE]
 HAL_SRC = ["stm32f1xx_hal.c", "stm32f1xx_hal_cortex.c", "stm32f1xx_hal_rcc.c",
-           "stm32f1xx_hal_rcc_ex.c", "stm32f1xx_hal_gpio.c", "stm32f1xx_hal_flash.c",
-           "stm32f1xx_hal_flash_ex.c", "stm32f1xx_hal_pwr.c", "stm32f1xx_hal_i2c.c",
-           "stm32f1xx_hal_adc.c", "stm32f1xx_hal_adc_ex.c", "stm32f1xx_hal_uart.c",
-           "stm32f1xx_hal_dma.c"]
+    "stm32f1xx_hal_rcc_ex.c", "stm32f1xx_hal_gpio.c", "stm32f1xx_hal_flash.c",
+    "stm32f1xx_hal_flash_ex.c", "stm32f1xx_hal_pwr.c", "stm32f1xx_hal_i2c.c",
+    "stm32f1xx_hal_adc.c", "stm32f1xx_hal_adc_ex.c", "stm32f1xx_hal_uart.c",
+    "stm32f1xx_hal_dma.c"]
 APP_SRC = ["main.c", "ina219.c", "ntc.c", "ssd1306.c", "protect.c", "esp8266.c"]
-SYS_SRC = [os.path.join(CMSIS, "Device", "ST", "STM32F1xx", "Source", "Templates", "system_stm32f1xx.c")]
-STARTUP = os.path.join(CMSIS, "Device", "ST", "STM32F1xx", "Source", "Templates", "gcc", "startup_stm32f103xb.s")
+SYS_SRC = [os.path.join(DEVICE, "Source", "Templates", "system_stm32f1xx.c")]
+STARTUP = os.path.join(DEVICE, "Source", "Templates", "gcc", "startup_stm32f103xb.s")
 
-objs = []
+objects = []
 errors = 0
 
 def run(cmd, tag):
     global errors
-    r = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
-    out = (r.stdout + r.stderr).strip()
-    if r.returncode != 0 or ("error" in out.lower() and out):
-        print(f"[FAIL] {tag}\n{out}")
+    result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
+    output = (result.stdout + result.stderr).strip()
+    if result.returncode != 0:
+        print(f"[FAIL] {tag}\\n{output}")
         errors += 1
-    elif out:
-        print(f"[warn] {tag}\n{out}")
-    return r.returncode == 0
+    elif output:
+        print(output)
+    return result.returncode == 0
 
-for src in HAL_SRC:
-    path = os.path.join(CUBE, "Src", src)
-    obj = os.path.join(BUILD, src + ".o")
-    if run([GCC] + CFLAGS + ["-c", path, "-o", obj], src):
-        objs.append(obj)
-
-for src in APP_SRC:
-    path = os.path.join(CORE, "Src", src)
-    obj = os.path.join(BUILD, src + ".o")
-    if run([GCC] + CFLAGS + ["-c", path, "-o", obj], src):
-        objs.append(obj)
-
-for path in SYS_SRC:
-    obj = os.path.join(BUILD, os.path.basename(path) + ".o")
-    if run([GCC] + CFLAGS + ["-c", path, "-o", obj], os.path.basename(path)):
-        objs.append(obj)
-
-obj_s = os.path.join(BUILD, "startup.o")
-if run([GCC] + CPU + ["-c", STARTUP, "-o", obj_s], "startup_stm32f103xb.s"):
-    objs.append(obj_s)
-
+for source in HAL_SRC:
+    src = os.path.join(HAL, "Src", source)
+    obj = os.path.join(BUILD, source + ".o")
+    if run([GCC] + CFLAGS + ["-c", src, "-o", obj], source):
+        objects.append(obj)
+for source in APP_SRC:
+    src = os.path.join(CORE, "Src", source)
+    obj = os.path.join(BUILD, source + ".o")
+    if run([GCC] + CFLAGS + ["-c", src, "-o", obj], source):
+        objects.append(obj)
+for src in SYS_SRC:
+    obj = os.path.join(BUILD, os.path.basename(src) + ".o")
+    if run([GCC] + CFLAGS + ["-c", src, "-o", obj], os.path.basename(src)):
+        objects.append(obj)
+startup_obj = os.path.join(BUILD, "startup.o")
+if run([GCC] + CPU + ["-c", STARTUP, "-o", startup_obj], "startup_stm32f103xb.s"):
+    objects.append(startup_obj)
 if errors:
-    print(f"\n编译失败: {errors} 个文件出错")
+    print(f"\\n编译失败：{errors} 个文件出错")
     sys.exit(1)
 
 elf = os.path.join(BUILD, "firmware.elf")
-ld  = os.path.join(os.path.dirname(os.path.abspath(__file__)), "STM32F103C8TX_FLASH.ld")
-r = subprocess.run([GCC] + CPU + ["-T", ld, "--specs=nano.specs", "--specs=nosys.specs",
-                                  "-Wl,--gc-sections", "-Wl,--defsym=end=_ebss", f"-Wl,-Map={BUILD}/firmware.map",
-                                  "-o", elf] + objs + ["-lm"], capture_output=True, text=True, errors="replace")
-if r.returncode != 0:
-    print("[FAIL] 链接\n" + (r.stdout + r.stderr))
+linker = os.path.join(HERE, "STM32F103C8TX_FLASH.ld")
+map_file = os.path.join(BUILD, "firmware.map")
+link = subprocess.run([GCC] + CPU + ["-T", linker, "--specs=nano.specs", "--specs=nosys.specs",
+    "-Wl,--gc-sections", f"-Wl,-Map={map_file}", "-o", elf] + objects + ["-lm"],
+    capture_output=True, text=True, errors="replace")
+if link.returncode != 0:
+    print("[FAIL] 链接\\n" + link.stdout + link.stderr)
     sys.exit(1)
-
 print(subprocess.run([SIZE, elf], capture_output=True, text=True, errors="replace").stdout)
-binf = os.path.join(BUILD, "firmware.bin")
-subprocess.run([OBJCOPY, "-O", "binary", elf, binf], check=True)
+binary = os.path.join(BUILD, "firmware.bin")
+subprocess.run([OBJCOPY, "-O", "binary", elf, binary], check=True)
 print("BUILD OK ->", elf)
-print("BIN ->", binf, os.path.getsize(binf), "bytes")
+print("BIN ->", binary, os.path.getsize(binary), "bytes")
