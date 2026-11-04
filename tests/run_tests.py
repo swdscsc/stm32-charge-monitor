@@ -12,11 +12,17 @@ sys.path.insert(0, os.path.join(ROOT, "simulation"))
 
 RESULTS = []
 
+class _Skip(Exception):
+    pass
+
 def tc(name, desc, func):
     try:
         detail = func()
         RESULTS.append((name, desc, "PASS", detail or ""))
         print(f"[PASS] {name} {desc}  {detail or ''}")
+    except _Skip as e:
+        RESULTS.append((name, desc, "SKIP", str(e)))
+        print(f"[SKIP] {name} {desc}  {e}")
     except AssertionError as e:
         RESULTS.append((name, desc, "FAIL", str(e)))
         print(f"[FAIL] {name} {desc}  {e}")
@@ -135,6 +141,18 @@ def TC07():
     assert size > 4096, "bin 异常小，可能链接裁剪过度"
     return f"firmware.bin {size} bytes (< 64KB)"
 
+def TC08():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "run_protect_tests", os.path.join(ROOT, "tests", "run_protect_tests.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rc = mod.main()
+    if rc == 2:
+        raise _Skip("未找到主机 C 编译器，C 单元测试需在本机/CI 安装 gcc 后运行")
+    assert rc == 0, "保护状态机 C 单元测试未通过"
+    return "保护状态机 C 单元测试全通过（含恢复入口/闭锁/自动恢复）"
+
 if __name__ == "__main__":
     print("=" * 64)
     print("stm32-charge-monitor 自动化测试")
@@ -146,7 +164,10 @@ if __name__ == "__main__":
     tc("TC05", "长时间运行稳定性（等效600s）", TC05)
     tc("TC06", "固件编译链接（Arm GCC -Wall）", TC06)
     tc("TC07", "固件体积预算（bin < 64KB）", TC07)
+    tc("TC08", "保护状态机 C 单元测试（真实 protect.c）", TC08)
     npass = sum(1 for r in RESULTS if r[2] == "PASS")
+    nskip = sum(1 for r in RESULTS if r[2] == "SKIP")
     print("-" * 64)
-    print(f"结果: {npass}/{len(RESULTS)} 通过")
-    sys.exit(0 if npass == len(RESULTS) else 1)
+    print(f"结果: {npass}/{len(RESULTS)} 通过, {nskip} 跳过")
+    failed = [r for r in RESULTS if r[2] in ("FAIL", "ERROR")]
+    sys.exit(0 if not failed else 1)

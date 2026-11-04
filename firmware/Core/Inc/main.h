@@ -11,6 +11,7 @@
 extern "C" {
 #endif
 #include "stm32f1xx_hal.h"
+#include "protect_cfg.h"   /* 监测数据结构与保护阈值（与保护逻辑共用，单一定义） */
 
 /* I2C1: PB6-SCL, PB7-SDA; ADC1_IN0: PA0; USART1: PA9/PA10 */
 #define NTC_ADC_Pin          GPIO_PIN_0
@@ -22,14 +23,6 @@ extern "C" {
 #define ESP8266_EN_Pin       GPIO_PIN_3
 #define ESP8266_EN_GPIO_Port GPIOA
 
-/* 安全阈值：电流阈值保守设为2.5A，须结合实际分流器/模块额定值复核 */
-#define TEMP_ALARM_THRESHOLD   45.0f
-#define TEMP_CUTOFF_THRESHOLD  60.0f
-#define TEMP_ALARM_HYST        3.0f
-#define OV_VOLTAGE_THRESHOLD   21.0f
-#define OC_CURRENT_THRESHOLD   2.5f
-#define ALARM_DEBOUNCE_COUNT   5
-
 #define SAMPLE_PERIOD_MS       100
 #define OLED_REFRESH_MS        500
 #define IOT_UPLOAD_MS          1000
@@ -37,16 +30,8 @@ extern "C" {
 #define INA219_ADDR            (0x40 << 1)
 #define SSD1306_ADDR           (0x78)
 
-typedef struct {
-    float bus_voltage;
-    float current;
-    float power;
-    float temperature;
-    uint8_t sensor_fault; /* 任一关键传感器无效时置1；保护逻辑立即切断 */
-    uint8_t alarm_active;
-    uint8_t relay_on;
-} monitor_data_t;
-extern monitor_data_t g_mon;
+/* 显式恢复请求标志：由本地/远程复位指令置位，主循环消费并调用 Protect_Recover() */
+extern volatile uint8_t g_recover_req;
 void Error_Handler(void);
 #ifdef __cplusplus
 }

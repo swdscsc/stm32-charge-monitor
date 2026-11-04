@@ -30,7 +30,9 @@ UART_HandleTypeDef huart1;
 
 /* ======================== 全局状态 ======================== */
 monitor_data_t g_mon = {0};
+volatile uint8_t g_recover_req = 0U;  /* 显式恢复请求（复位指令置位，主循环消费） */
 static uint8_t ina219_ok = 0;    /* INA219 在线标志 */
+static uint8_t oled_ok = 0;      /* OLED 在线标志 */
 
 /* 滑动窗口滤波: 电压/电流 (NTC 在 ntc.c 内部滤波) */
 static float v_win[FILTER_WINDOW], i_win[FILTER_WINDOW];
@@ -183,7 +185,11 @@ int main(void)
 
     NTC_Init(&hadc1);
     ina219_ok = (INA219_Init(&hi2c1) == HAL_OK);
-    SSD1306_Init(&hi2c1);
+    oled_ok = (SSD1306_Init(&hi2c1) == HAL_OK);
+    if (!oled_ok) {
+        /* OLED 缺失：不阻塞主循环，后续渲染将被守卫跳过 */
+        SSD1306_Clear();
+    }
     Protect_Init();
 #if ENABLE_ESP8266
     ESP8266_Init(&huart1);
@@ -199,6 +205,12 @@ int main(void)
 
     while (1) {
         uint32_t now = millis();
+
+        /* ---- 显式恢复请求（复位指令）：解除阈值闭锁切断 ---- */
+        if (g_recover_req) {
+            g_recover_req = 0U;
+            Protect_Recover();
+        }
 
         /* ---- 100ms: 采集 + 保护 ---- */
         if (now - t_sample >= SAMPLE_PERIOD_MS) {
@@ -228,7 +240,7 @@ int main(void)
         /* ---- 500ms: 显示刷新 ---- */
         if (now - t_oled >= OLED_REFRESH_MS) {
             t_oled = now;
-            OLED_RenderUI();
+            if (oled_ok) OLED_RenderUI();
         }
 
         /* ---- 1000ms: 物联网上传 ---- */

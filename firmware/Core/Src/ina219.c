@@ -62,6 +62,9 @@ HAL_StatusTypeDef INA219_ReadAll(float *voltage, float *current, float *power)
         return HAL_ERROR;
 
     /* 总线电压: 16位寄存器右移3位丢状态位, 13位有效, LSB=4mV (SBOS499E 8.6.3) */
+    /* bit0 = OVF (Math Overflow): 功率/电流超出量程时置位, 读数不可信 */
+    if (raw_bus & 0x0001U)
+        return HAL_ERROR;
     *voltage = (float)((raw_bus >> 3) & 0x1FFF) * 0.004f;
 
     /* 电流为有符号数, LSB 由标定寄存器决定 */
