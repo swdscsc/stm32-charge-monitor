@@ -32,6 +32,7 @@ static HAL_StatusTypeDef INA219_ReadReg(uint8_t reg, uint16_t *val)
 
 HAL_StatusTypeDef INA219_Init(I2C_HandleTypeDef *hi2c)
 {
+    if (hi2c == NULL) return HAL_ERROR;
     s_hi2c = hi2c;
     uint16_t id = 0;
     /* 复位后校验芯片在位: 写标定寄存器并回读 */
@@ -44,12 +45,14 @@ HAL_StatusTypeDef INA219_Init(I2C_HandleTypeDef *hi2c)
 
 uint8_t INA219_IsReady(void)
 {
-    return (HAL_I2C_IsDeviceReady(s_hi2c, INA219_ADDR, 2, 50) == HAL_OK);
+    return (s_hi2c != NULL && HAL_I2C_IsDeviceReady(s_hi2c, INA219_ADDR, 2, 50) == HAL_OK);
 }
 
 HAL_StatusTypeDef INA219_ReadAll(float *voltage, float *current, float *power)
 {
     uint16_t raw_bus = 0, raw_power = 0, raw_cur = 0;
+    if (s_hi2c == NULL || voltage == NULL || current == NULL || power == NULL)
+        return HAL_ERROR;
 
     if (INA219_ReadReg(INA219_REG_BUSVOLTAGE, &raw_bus) != HAL_OK)
         return HAL_ERROR;
