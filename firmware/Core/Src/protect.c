@@ -1,93 +1,145 @@
 /**
   ******************************************************************************
   * @file    protect.c
-  * @brief   保护逻辑实现
-  *          设计要点: 1) 任何超限必须连续 ALARM_DEBOUNCE_COUNT 次采样
- *          均成立才确认, 防止毛刺误触发; 2) 进入 CUTOFF 后继电器闭锁,
- *          需温度回降到安全区并手动恢复, 避免热振荡反复通断。
+  * @brief   保护状态机：连续采样确认、传感器故障切断与安全条件恢复
   ******************************************************************************
   */
 #include "protect.h"
+#include <math.h>
 
 static protect_state_t s_state = PROTECT_NORMAL;
-static uint8_t s_debounce = 0;
+static uint8_t s_alarm_debounce = 0;
+static uint8_t s_cutoff_debounce = 0;
+static uint8_t s_last_sample_safe = 0;
+
+static void RelayOff(void)
+{
+    /* 本工程定义继电器驱动为高电平吸合，低电平断开。实物模块必须核验。 */
+    HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
+    g_mon.relay_on = 0U;
+}
+
+static void RelayOn(void)
+{
+    HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
+    g_mon.relay_on = 1U;
+}
 
 void Protect_Init(void)
 {
     s_state = PROTECT_NORMAL;
-    s_debounce = 0;
-    HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);    /* 吸合 */
+    s_alarm_debounce = 0U;
+    s_cutoff_debounce = 0U;
+    s_last_sample_safe = 0U;
+    RelayOff(); /* 上电默认断开，未经有效采样与人工恢复不得自动吸合 */
     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+    g_mon.alarm_active = 1U;
 }
 
-/* 返回 1 表示该采样点存在超限 */
-static uint8_t CheckLimits(const monitor_data_t *mon)
+static uint8_t SampleValid(const monitor_data_t *m)
 {
-    if (mon->temperature >= TEMP_CUTOFF_THRESHOLD) return 1;
-    if (mon->temperature >= TEMP_ALARM_THRESHOLD)  return 1;
-    if (mon->bus_voltage   >= OV_VOLTAGE_THRESHOLD) return 1;
-    if (mon->current       >= OC_CURRENT_THRESHOLD) return 1;
-    return 0;
+    return (m != NULL && m->sensor_fault == 0U &&
+            isfinite(m->temperature) && isfinite(m->bus_voltage) &&
+            isfinite(m->current) && isfinite(m->power) &&
+            m->temperature >= -40.0f && m->temperature <= 150.0f &&
+            m->bus_voltage >= 0.0f && m->bus_voltage <= 21.0f &&
+            m->current >= 0.0f);
+}
+
+static uint8_t AlarmLimit(const monitor_data_t *m)
+{
+    return (m->temperature >= TEMP_ALARM_THRESHOLD ||
+            m->bus_voltage >= OV_VOLTAGE_THRESHOLD ||
+            m->current >= OC_CURRENT_THRESHOLD);
+}
+
+static uint8_t CutoffLimit(const monitor_data_t *m)
+{
+    return (m->temperature >= TEMP_CUTOFF_THRESHOLD ||
+            m->bus_voltage >= OV_VOLTAGE_THRESHOLD ||
+            m->current >= OC_CURRENT_THRESHOLD);
 }
 
 protect_state_t Protect_Update(const monitor_data_t *mon)
 {
-    uint8_t over = CheckLimits(mon);
+    if (!SampleValid(mon)) {
+        /* 关键传感器故障不做延时防抖：立即断开并锁存 */
+        s_state = PROTECT_CUTOFF;
+        s_alarm_debounce = 0U;
+        s_cutoff_debounce = 0U;
+        s_last_sample_safe = 0U;
+        RelayOff();
+        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+    } else {
+        uint8_t alarm = AlarmLimit(mon);
+        uint8_t cutoff = CutoffLimit(mon);
+        s_last_sample_safe = (uint8_t)(!alarm && !cutoff);
 
-    switch (s_state) {
-    case PROTECT_NORMAL:
-        if (over) {
-            if (++s_debounce >= ALARM_DEBOUNCE_COUNT) {
-                s_debounce = 0;
-                if (mon->temperature >= TEMP_CUTOFF_THRESHOLD ||
-                    mon->bus_voltage >= OV_VOLTAGE_THRESHOLD ||
-                    mon->current >= OC_CURRENT_THRESHOLD) {
-                    /* 危险级: 切断低压负载 */
-                    HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-                    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+        switch (s_state) {
+        case PROTECT_NORMAL:
+            if (cutoff) {
+                if (++s_cutoff_debounce >= ALARM_DEBOUNCE_COUNT) {
                     s_state = PROTECT_CUTOFF;
-                } else {
-                    /* 警告级: 仅蜂鸣提示 */
+                    s_cutoff_debounce = 0U;
+                    RelayOff();
                     HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
-                    s_state = PROTECT_ALARM;
+                }
+            } else {
+                s_cutoff_debounce = 0U;
+                if (alarm) {
+                    if (++s_alarm_debounce >= ALARM_DEBOUNCE_COUNT) {
+                        s_state = PROTECT_ALARM;
+                        s_alarm_debounce = 0U;
+                        HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+                    }
+                } else {
+                    s_alarm_debounce = 0U;
+                    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
                 }
             }
-        } else {
-            s_debounce = 0;
-            HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-        }
-        break;
+            break;
 
-    case PROTECT_ALARM:
-        if (!over) {
-            HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-            s_state = PROTECT_NORMAL;
-        } else if (mon->temperature >= TEMP_CUTOFF_THRESHOLD ||
-                   mon->bus_voltage >= OV_VOLTAGE_THRESHOLD ||
-                   mon->current >= OC_CURRENT_THRESHOLD) {
-            HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_RESET);
-            s_state = PROTECT_CUTOFF;
-        }
-        break;
+        case PROTECT_ALARM:
+            if (cutoff) {
+                if (++s_cutoff_debounce >= ALARM_DEBOUNCE_COUNT) {
+                    s_state = PROTECT_CUTOFF;
+                    s_cutoff_debounce = 0U;
+                    RelayOff();
+                }
+            } else {
+                s_cutoff_debounce = 0U;
+                if (mon->temperature < (TEMP_ALARM_THRESHOLD - TEMP_ALARM_HYST) &&
+                    mon->bus_voltage < OV_VOLTAGE_THRESHOLD &&
+                    mon->current < OC_CURRENT_THRESHOLD) {
+                    s_state = PROTECT_NORMAL;
+                    HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
+                }
+            }
+            break;
 
-    case PROTECT_CUTOFF:
-        /* 闭锁: 蜂鸣器以 2Hz 慢闪提示, 继电器保持断开 */
-        HAL_GPIO_TogglePin(BUZZER_GPIO_Port, BUZZER_Pin);
-        break;
+        case PROTECT_CUTOFF:
+        default:
+            /* 闭锁状态：只允许 Protect_Recover 在安全采样后恢复 */
+            RelayOff();
+            HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_SET);
+            break;
+        }
     }
 
-    g_mon.alarm_active = (s_state != PROTECT_NORMAL);
-    g_mon.relay_on = (s_state != PROTECT_CUTOFF);
+    g_mon.alarm_active = (uint8_t)(s_state != PROTECT_NORMAL);
+    g_mon.relay_on = (uint8_t)(s_state != PROTECT_CUTOFF && g_mon.relay_on);
     return s_state;
 }
 
 void Protect_Recover(void)
 {
-    if (s_state == PROTECT_CUTOFF) {
+    if (s_state == PROTECT_CUTOFF && s_last_sample_safe != 0U) {
         s_state = PROTECT_NORMAL;
-        s_debounce = 0;
+        s_alarm_debounce = 0U;
+        s_cutoff_debounce = 0U;
         HAL_GPIO_WritePin(BUZZER_GPIO_Port, BUZZER_Pin, GPIO_PIN_RESET);
-        HAL_GPIO_WritePin(RELAY_GPIO_Port, RELAY_Pin, GPIO_PIN_SET);
+        RelayOn();
+        g_mon.alarm_active = 0U;
     }
 }
 
