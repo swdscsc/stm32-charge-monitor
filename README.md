@@ -46,11 +46,10 @@ stm32-charge-monitor/
 
 ### 编译（无需 Keil / STM32CubeIDE）
 
-1. 将 HAL/CMSIS 按下述路径放置（或改 `GCC_BUILD/build.py` 顶部的路径常量）：
-   - `STM32F1xx_HAL_Driver/`（`Inc/`、`Src/`）
-   - `CMSIS/Device/ST/STM32F1xx/`（cmsis_device_f1 仓库）
-   - `CMSIS/Include/`（CMSIS_5 的 `CMSIS/Core/Include`）
-2. 运行：
+1. 安装 Arm GNU Toolchain，并将 `arm-none-eabi-gcc`、`objcopy`、`size` 加入 PATH；或设置 `ARM_GCC_BIN` 指向工具链 bin 目录。
+2. 将 STM32 HAL 与 CMSIS 放在仓库的 `Drivers/STM32F1xx_HAL_Driver/` 和 `Drivers/CMSIS/`；也可通过环境变量 `STM32_HAL_ROOT`、`CMSIS_ROOT` 指定实际目录。
+3. 默认目录结构需包含 HAL 的 `Inc/`、`Src/`，以及 CMSIS 的 `Device/ST/STM32F1xx/Include`、`Include/`。
+4. 运行：
 
 ```bash
 cd firmware/GCC_BUILD
