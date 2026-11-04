@@ -69,7 +69,7 @@ def run(cmd, tag):
     result = subprocess.run(cmd, capture_output=True, text=True, errors="replace")
     output = (result.stdout + result.stderr).strip()
     if result.returncode != 0:
-        print(f"[FAIL] {tag}\\n{output}")
+        print(f"[FAIL] {tag}\n{output}")
         errors += 1
     elif output:
         print(output)
@@ -93,7 +93,7 @@ startup_obj = os.path.join(BUILD, "startup.o")
 if run([GCC] + CPU + ["-c", STARTUP, "-o", startup_obj], "startup_stm32f103xb.s"):
     objects.append(startup_obj)
 if errors:
-    print(f"\\n编译失败：{errors} 个文件出错")
+    print(f"\n编译失败：{errors} 个文件出错")
     sys.exit(1)
 
 elf = os.path.join(BUILD, "firmware.elf")
@@ -103,7 +103,7 @@ link = subprocess.run([GCC] + CPU + ["-T", linker, "--specs=nano.specs", "--spec
     "-Wl,--gc-sections", f"-Wl,-Map={map_file}", "-o", elf] + objects + ["-lm"],
     capture_output=True, text=True, errors="replace")
 if link.returncode != 0:
-    print("[FAIL] 链接\\n" + link.stdout + link.stderr)
+    print("[FAIL] 链接\n" + link.stdout + link.stderr)
     sys.exit(1)
 print(subprocess.run([SIZE, elf], capture_output=True, text=True, errors="replace").stdout)
 binary = os.path.join(BUILD, "firmware.bin")
