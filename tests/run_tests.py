@@ -71,7 +71,7 @@ def protect_session(T_cut_hit=True):
 
 # ---------- 用例 ----------
 def TC01():
-    for tv, ti in [(5.0, 0.5), (9.0, 1.5), (12.0, 2.0), (15.0, 2.5), (20.0, 3.0)]:
+    for tv, ti in [(5.0, 0.5), (9.0, 1.0), (12.0, 1.5), (15.0, 2.0), (20.0, 2.5)]:
         v, i, p = ina_read(tv, ti)
         assert abs(v - tv) <= 0.004, f"电压 {v} vs {tv}"
         assert abs(i - ti) <= 0.0008, f"电流 {i} vs {ti}"
@@ -117,7 +117,7 @@ def TC06():
                        errors="replace", env=env, cwd=os.path.dirname(script))
     out = r.stdout + r.stderr
     assert "BUILD OK" in out, f"编译失败:\n{out[-800:]}"
-    assert "warning" not in out.lower().replace("warning: _close", "") or True
+    assert "warning:" not in out.lower(), f"编译存在警告:\n{out[-800:]}"
     # 提取 size 行
     for ln in out.splitlines():
         if "firmware.elf" in ln and ln.split()[0].isdigit():
