@@ -30,7 +30,7 @@ stm32-charge-monitor/
 │   ├── sim_core.py          换算验证 + 保护场景仿真 + 测试曲线生成
 │   └── fig_*.py             论文/展示图生成脚本
 ├── tests/
-│   └── run_tests.py         TC01~TC07 自动化测试入口（python tests/run_tests.py）
+│   └── run_tests.py         TC01~TC07 自动化测试入口（python tests/run_current_checks.py）
 ├── figures/                 架构/接线/流程/界面/测试曲线图
 └── docs/screenshots/        编译、测试、烧录工具的真实运行截图
 ```
@@ -41,7 +41,7 @@ stm32-charge-monitor/
 
 | 工具 | 用途 | 获取 |
 |------|------|------|
-| Python 3.10+ | 测试与仿真 | [python.org](https://python.org)，需 `numpy matplotlib` |
+| Python 3.10+ | 测试与仿真 | [python.org](https://python.org)，测试脚本无需 numpy；仿真绘图脚本如需运行再安装 matplotlib |
 | Arm GNU Toolchain 13.2 | 固件编译 | [developer.arm.com](https://developer.arm.com/downloads/-/arm-gnu-toolchain-downloads)（mingw-w64-i686-arm-none-eabi） |
 | STM32F1 HAL Driver + CMSIS(device_f1 + CMSIS_5 Core/Include) | 编译依赖 | [STMicroelectronics GitHub](https://github.com/STMicroelectronics/stm32f1xx_hal_driver) |
 | xPack OpenOCD + ST-Link V2 | 烧录 | [xpack-dev-tools/openocd-xpack](https://github.com/xpack-dev-tools/openocd-xpack/releases) |
@@ -69,7 +69,7 @@ openocd -f interface/stlink.cfg -f target/stm32f1x.cfg ^
 ### 运行自动化测试
 
 ```bash
-python tests/run_tests.py      # 执行数值测试；编译用例需本机工具链与依赖
+python tests/run_current_checks.py      # 执行数值测试；编译用例需本机工具链与依赖
 ```
 
 ## 测试结果摘要
