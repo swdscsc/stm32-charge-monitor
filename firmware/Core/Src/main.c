@@ -157,10 +157,10 @@ static void OLED_RenderUI(void)
     SSD1306_ShowBigNumber(0, 3, g_mon.current, 3);
     SSD1306_ShowString(11, 3, "A");
 
-    SSD1306_ShowString(0, 5, "TEMP:");
-    SSD1306_ShowFloat(5, 5, g_mon.temperature, 1);
-    SSD1306_ShowString(12, 5, "C ST:");
-    SSD1306_ShowString(17, 5, Protect_StateName());
+    SSD1306_ShowString(0, 5, "T:");
+    SSD1306_ShowFloat(2, 5, g_mon.temperature, 1);
+    SSD1306_ShowString(8, 5, "C S:");
+    SSD1306_ShowString(12, 5, Protect_StateName());
 
     SSD1306_ShowString(0, 6, g_mon.relay_on ? "[RELAY ON ]" : "[RELAY OFF]");
     SSD1306_ShowString(12, 6, ina219_ok ? "[INA OK]" : "[INA ER]");
