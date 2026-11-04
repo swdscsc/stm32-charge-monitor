@@ -3,7 +3,7 @@
 <g font-family="Consolas,monospace" fill="#e2e8f0"><text x="130" y="210" font-size="20" font-weight="700">CHARGE MONITOR</text><text x="790" y="210" font-size="17" text-anchor="end">P: 12.5</text>
 <text x="130" y="290" font-size="45" font-weight="700">20.00</text><text x="410" y="290" font-size="20">V</text>
 <text x="130" y="370" font-size="45" font-weight="700">2.500</text><text x="410" y="370" font-size="20">A</text>
-<text x="130" y="425" font-size="18">TEMP: 38.5 C  ST: NORMAL</text>
+<text x="130" y="425" font-size="18">T: 38.5 C  S: NORMAL</text>
 <text x="130" y="465" font-size="17" fill="#7dd3fc">[RELAY ON ]</text><text x="420" y="465" font-size="17" fill="#86efac">[INA OK]</text><text x="130" y="500" font-size="15" fill="#fbbf24">** WARNING! CHECK **</text></g>
 <rect x="875" y="165" width="190" height="355" rx="18" fill="#fff" stroke="#dbe3ee"/><text x="970" y="205" text-anchor="middle" font-family="Microsoft YaHei" font-size="18" font-weight="700" fill="#172033">布局说明</text>
 <g font-family="Microsoft YaHei" font-size="15" fill="#475569"><text x="900" y="250">Page 0：标题 / 功率</text><text x="900" y="295">Page 1–2：电压</text><text x="900" y="340">Page 3–4：电流</text><text x="900" y="385">Page 5：温度 / 状态</text><text x="900" y="430">Page 6：继电器 / INA</text><text x="900" y="475">Page 7：报警提示</text></g>
