@@ -138,9 +138,11 @@ static uint32_t millis(void) { return s_ms; }
 /*
  * 布局 (128x64, 8行x21列 6x8 字体):
  *   Page0: CHARGE MONITOR  P:xx.xW
- *   Page1-2: 20.00V  3.000A (大字号)
- *   Page4: TEMP: 35.5 C   ST:NORMAL
- *   Page6: [RELAY ON] [I2C OK]
+ *   Page1-2: 电压大字号
+ *   Page3-4: 电流大字号
+ *   Page5: TEMP / ST
+ *   Page6: RELAY / INA 状态
+ *   Page7: 报警提示（按需显示）
  */
 static void OLED_RenderUI(void)
 {
@@ -149,15 +151,16 @@ static void OLED_RenderUI(void)
     SSD1306_ShowString(15, 0, "P:");
     SSD1306_ShowFloat(17, 0, g_mon.power, 1);
 
-    SSD1306_ShowBigNumber(0, 1, g_mon.bus_voltage, 2);   /* 电压 */
+    /* 大数字按上下两行排版：避免第二组数字越过128px屏幕右边界 */
+    SSD1306_ShowBigNumber(0, 1, g_mon.bus_voltage, 2);
     SSD1306_ShowString(11, 1, "V");
-    SSD1306_ShowBigNumber(13, 1, g_mon.current, 3);      /* 电流 */
-    SSD1306_ShowString(20, 1, "A");
+    SSD1306_ShowBigNumber(0, 3, g_mon.current, 3);
+    SSD1306_ShowString(11, 3, "A");
 
-    SSD1306_ShowString(0, 4, "TEMP:");
-    SSD1306_ShowFloat(5, 4, g_mon.temperature, 1);
-    SSD1306_ShowString(12, 4, "C ST:");
-    SSD1306_ShowString(17, 4, Protect_StateName());
+    SSD1306_ShowString(0, 5, "TEMP:");
+    SSD1306_ShowFloat(5, 5, g_mon.temperature, 1);
+    SSD1306_ShowString(12, 5, "C ST:");
+    SSD1306_ShowString(17, 5, Protect_StateName());
 
     SSD1306_ShowString(0, 6, g_mon.relay_on ? "[RELAY ON ]" : "[RELAY OFF]");
     SSD1306_ShowString(12, 6, ina219_ok ? "[INA OK]" : "[INA ER]");
