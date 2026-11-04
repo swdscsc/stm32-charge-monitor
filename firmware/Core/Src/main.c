@@ -21,6 +21,7 @@
 #include "esp8266.h"
 #include <stdio.h>
 #include <string.h>
+#include <math.h>
 
 /* ======================== 外设句柄 ======================== */
 I2C_HandleTypeDef  hi2c1;
@@ -201,16 +202,23 @@ int main(void)
             t_sample = now;
 
             float v = 0.0f, i = 0.0f, p = 0.0f;
+            g_mon.sensor_fault = 0U;
             if (ina219_ok && INA219_ReadAll(&v, &i, &p) == HAL_OK) {
                 FilterPush(v, i);
                 FilterGet(&g_mon.bus_voltage, &g_mon.current);
                 g_mon.power = g_mon.bus_voltage * g_mon.current;
             } else {
-                ina219_ok = 0;   /* 传感器掉线, 下周期重试 */
-                if (INA219_Init(&hi2c1) == HAL_OK) ina219_ok = 1;
+                g_mon.sensor_fault = 1U; /* INA219失联：本周期立即进入故障切断 */
+                ina219_ok = 0U;
+                if (INA219_Init(&hi2c1) == HAL_OK) ina219_ok = 1U;
             }
 
-            g_mon.temperature = NTC_ReadTemperature();
+            float temperature = NTC_ReadTemperature();
+            if (isfinite(temperature)) {
+                g_mon.temperature = temperature;
+            } else {
+                g_mon.sensor_fault = 1U; /* NTC无效：禁止使用旧温度继续供电 */
+            }
             Protect_Update(&g_mon);
         }
 
