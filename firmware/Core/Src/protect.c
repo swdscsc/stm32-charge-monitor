@@ -24,7 +24,7 @@ static uint8_t SampleValid(const monitor_data_t *m)
     return (uint8_t)(m != NULL && m->sensor_fault == 0U && isfinite(m->temperature) &&
         isfinite(m->bus_voltage) && isfinite(m->current) && isfinite(m->power) &&
         m->temperature >= -40.0f && m->temperature <= 150.0f &&
-        m->bus_voltage >= 0.0f && m->bus_voltage <= 32.0f && m->current >= 0.0f);
+        m->bus_voltage >= 0.0f && m->bus_voltage <= 26.0f && m->current >= 0.0f);
 }
 static uint8_t AlarmLimit(const monitor_data_t *m)
 { return (uint8_t)(m->temperature >= TEMP_ALARM_THRESHOLD || m->bus_voltage >= OV_VOLTAGE_THRESHOLD || m->current >= OC_CURRENT_THRESHOLD); }
