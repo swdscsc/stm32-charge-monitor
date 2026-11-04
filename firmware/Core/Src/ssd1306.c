@@ -182,6 +182,7 @@ void SSD1306_DrawPixel(uint8_t x, uint8_t y, uint8_t color)
 /* col: 0~21 (6像素列), page: 0~7 (8像素行) */
 void SSD1306_ShowChar(uint8_t col, uint8_t page, char ch)
 {
+    if (page >= 8U || col > 20U) return;
     if (ch < ' ' || ch > '~') ch = '?';
     const uint8_t *glyph = FONT6x8[ch - ' '];
     uint16_t base = page * SSD1306_WIDTH + col * 6;
@@ -193,7 +194,7 @@ void SSD1306_ShowString(uint8_t col, uint8_t page, const char *str)
 {
     while (*str) {
         SSD1306_ShowChar(col, page, *str++);
-        if (++col > 21) { col = 0; if (++page > 7) return; }
+        if (++col > 20) { col = 0; if (++page > 7) return; }
     }
 }
 
