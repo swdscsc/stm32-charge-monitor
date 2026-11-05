@@ -7,7 +7,10 @@
   * OWNERINDEX 为 0 基记录序号（sheet 记录 = 0，header 不计）
   * 矩形是 RECORD=10（LOCATION + CORNER），不是 13
   * 导线 RECORD=27（LOCATIONCOUNT + X1..Xn/Y1..Yn）
-  * 引脚 RECORD=2；PINCONGLOMERATE 低 2 位 = 朝向(0右/1上/2左/3下)，0x38 = 显示标志
+  * 引脚 RECORD=2；LOCATION 是引脚根部(贴元件体侧)，电气热点 =
+    LOCATION + 方向 × PINLENGTH；方向由 PINCONGLOMERATE 低 2 位给出
+    (0=+X / 1=+Y / 2=-X / 3=-Y，Y 轴向上)，0x38 = 显示标志
+  * 导线必须接在电气热点上；接在 LOCATION 会让末端标号被判 Floating
   * 网络标号 RECORD=25，电源端口 RECORD=17，连接点 RECORD=29，文本 RECORD=4
 """
 import math
@@ -53,6 +56,7 @@ class Sch:
                  sheetname="Sheet1", xzones=8, yzones=5, margin=10):
         self.recs = []
         self.next_uuid = 0
+        self._sheet_index = 0
         self._desig = {}
         cx, cxf = mm(width_mm)
         cy, cyf = mm(height_mm)
@@ -85,6 +89,12 @@ class Sch:
         idx = len(self.recs)
         self.recs.append("|".join(fields))
         return idx
+
+    def sheet_idx(self):
+        """顶层图元的唯一序号。Altium 用 INDEXINSHEET 建立连接图；
+        缺失或全为 0 会把每个网络标号/电源端口判为 Floating（ERC 警告）。"""
+        self._sheet_index += 1
+        return "INDEXINSHEET=%d" % self._sheet_index
 
     def uid(self, prefix="a"):
         self.next_uuid += 1
@@ -143,16 +153,31 @@ class Sch:
 
         hot = {}
         for (pdes, pname, side, off, plen, elec) in pins:
-            # PINCONGLOMERATE 低 2 位 = 引脚线"由电气端指向元件体"的方向
-            #   0=右 1=上 2=左 3=下
-            if side == "L":                 # 电气端在体左 -> 线向右进体
-                hx, hy, cong = x - plen, y + off, 56 | 0
-            elif side == "R":               # 电气端在体右 -> 线向左进体
-                hx, hy, cong = x2 + plen, y + off, 56 | 2
-            elif side == "T":               # 电气端在体上 -> 线向下进体
-                hx, hy, cong = x + off, y2 + plen, 56 | 3
-            else:                           # 电气端在体下 -> 线向上进体
-                hx, hy, cong = x + off, y - plen, 56 | 1
+            # Altium pin 记录的 LOCATION 是「引脚根部」(贴元件体一侧)，电气热点
+            # = LOCATION + 方向 * PINLENGTH。方向由 PINCONGLOMERATE 低 2 位编码，
+            # 从 Altium 原生 SchDoc 逐点反推（Y 轴向上）：0=+X 1=+Y 2=-X 3=-Y。
+            # 早期版本把 LOCATION 直接写成热点、且方向位全部用反，Altium 因此
+            # 认为导线落在非电气点上 -> 末端标号/电源端口批量报 Floating。
+            if side == "L":          # 热点在体左外侧，根部贴在体左边缘
+                hx, hy = x - plen, y + off
+                rot, dx, dy = 2, -1, 0
+            elif side == "R":
+                hx, hy = x2 + plen, y + off
+                rot, dx, dy = 0, +1, 0
+            elif side == "T":
+                hx, hy = x + off, y2 + plen
+                rot, dx, dy = 1, 0, +1
+            else:                    # B
+                hx, hy = x + off, y - plen
+                rot, dx, dy = 3, 0, -1
+            cong = 56 | rot
+            plen_u = mm2u(plen)
+            hxi, _ = mm(hx)
+            hyi, _ = mm(hy)
+            # 用整数坐标单位反推根部，避免 mm() 的 floor 与 mm2u() 的 round
+            # 相差 1 单位导致 Altium 推出的热点与导线端点错开一格。
+            rxi = hxi - dx * plen_u
+            ryi = hyi - dy * plen_u
             # Altium 在本方言里把引脚名压在引脚线上、还伸到体外，与网络标号打架；
             # 每个引脚都已有网络标号/电源端口，故统一隐藏引脚名，只保留引脚号。
             shown = "" if HIDE_PIN_NAMES else pname
@@ -160,15 +185,17 @@ class Sch:
                 shown = ""
             self.add(
                 "RECORD=2", "OWNERINDEX=%d" % ci, "OWNERPARTID=1",
-                "OWNERPARTDISPLAYMODE=0", "ISNOTACCESIBLE=T",
+                "OWNERPARTDISPLAYMODE=0", "FORMALTYPE=1",
+                # 注意：不能写 ISNOTACCESIBLE=T，否则 Altium 把引脚判为电气不可访问，
+                # 连到它的导线不算有效连接，末端网络标号会被批量报 "Floating Net Label"。
                 "ELECTRICAL=%d" % elec,
                 "SYMBOL_INNER=0", "SYMBOL_INNEREDGE=0",
                 "SYMBOL_OUTER=0", "SYMBOL_OUTEREDGE=0",
                 "COLOR=136", "FONTID=%d" % FONT_PIN,
                 "DESIGNATOR=%s" % pdes, "NAME=%s" % (shown or "~"),
                 "PINCONGLOMERATE=%d" % cong,
-                *self._loc(hx, hy),
-                "PINLENGTH=%d" % mm2u(plen))
+                "LOCATION.X=%d" % rxi, "LOCATION.Y=%d" % ryi,
+                "PINLENGTH=%d" % plen_u)
             key = pname if pname else str(pdes)
             hot[key] = (hx, hy, side)
         return ci, hot
@@ -194,37 +221,38 @@ class Sch:
 
     # ------------------------------------------------------------------
     def wire(self, pts, color=0):
-        f = ["RECORD=27", "OWNERINDEX=0", "OWNERPARTID=-1",
-             "LINEWIDTH=1", "LOCATIONCOUNT=%d" % len(pts)]
+        # 原生格式：INDEXINSHEET + OWNERPARTID=-1，坐标字段只用 Xn/Yn（不带 _FRAC）
+        f = ["RECORD=27", self.sheet_idx(), "OWNERPARTID=-1",
+             "LINEWIDTH=1", "COLOR=%d" % color,
+             "LOCATIONCOUNT=%d" % len(pts)]
         for i, (x, y) in enumerate(pts, 1):
-            xi, xf = mm(x)
-            yi, yf = mm(y)
-            f += ["X%d=%d" % (i, xi), "X%d_FRAC=%d" % (i, xf),
-                  "Y%d=%d" % (i, yi), "Y%d_FRAC=%d" % (i, yf)]
-        f += ["COLOR=%d" % color]
+            xi, _ = mm(x)
+            yi, _ = mm(y)
+            f += ["X%d=%d" % (i, xi), "Y%d=%d" % (i, yi)]
         return self.add(*f)
 
     def netlabel(self, x, y, text, orientation=0, justification=0):
         return self.add(
-            "RECORD=25", "OWNERINDEX=0", "OWNERPARTID=-1", *self._loc(x, y),
+            "RECORD=25", self.sheet_idx(), "OWNERPARTID=-1", *self._loc(x, y),
             "FONTID=%d" % FONT_LABEL, "TEXT=%s" % text,
             "ORIENTATION=%d" % orientation,
             "JUSTIFICATION=%d" % justification, "COLOR=0")
 
     def powerport(self, x, y, text, style=1, orientation=1):
         return self.add(
-            "RECORD=17", "OWNERINDEX=0", "OWNERPARTID=-1", *self._loc(x, y),
+            "RECORD=17", self.sheet_idx(), "OWNERPARTID=-1", *self._loc(x, y),
+            "SHOWNETNAME=T",
             "FONTID=%d" % FONT_LABEL, "TEXT=%s" % text,
             "STYLE=%d" % style, "ISHIDDEN=F",
             "ORIENTATION=%d" % orientation, "COLOR=0")
 
     def junction(self, x, y, size=2):
-        return self.add("RECORD=29", "OWNERINDEX=0", "OWNERPARTID=-1", *self._loc(x, y),
+        return self.add("RECORD=29", "INDEXINSHEET=-1", "OWNERPARTID=-1", *self._loc(x, y),
                         "SIZE=%d" % size, "COLOR=0")
 
     def text(self, x, y, s, font=FONT_NOTE, orientation=0, justification=0):
         return self.add(
-            "RECORD=4", "OWNERINDEX=0", "OWNERPARTID=-1", *self._loc(x, y),
+            "RECORD=4", self.sheet_idx(), "OWNERPARTID=-1", *self._loc(x, y),
             "FONTID=%d" % font, "TEXT=%s" % s,
             "ORIENTATION=%d" % orientation,
             "JUSTIFICATION=%d" % justification, "COLOR=0")

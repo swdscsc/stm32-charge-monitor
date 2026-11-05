@@ -74,7 +74,14 @@ def place(ref, libref, x, y, w, h, spec, value="", footprint="", vpos=None):
 place("J1", "USB_5V", 30, 345, 22, 30, [
     (1, "VBUS", "R", 24, PINLEN, 7),
     (2, "GND", "B", 11, PINLEN, 7),
-], value="USB 5V")
+], value="USB 5V")   # 仅给 MCU/LDO 与继电器线圈供电，不参与被测电流回路
+
+# 被测直流输入（快充头/电池侧，5–20V）与 MCU 供电 USB 5V 是两条独立回路。
+# 负端必须与 MCU 共地（INA219 的 VBUS 为对 GND 的单端测量），且只限隔离低压直流。
+place("J6", "DC_IN", 30, 296, 22, 26, [
+    (1, "V+", "L", 18, PINLEN, 7),
+    (2, "V-", "L", 8, PINLEN, 7),
+], value="DC IN 5-20V", vpos="below")
 
 place("C1", "CAP", 80, 340, 8, 16, [
     (1, "1", "T", 4, PINLEN, 4),
@@ -96,17 +103,21 @@ place("C2", "CAP", 182, 340, 8, 16, [
 place("R1", "R_SHUNT", 226, 372, 22, 7, [
     (1, "1", "L", 3.5, PINLEN, 4),
     (2, "2", "R", 3.5, PINLEN, 4),
-], value="0.1R/1W", vpos="below")
+], value="0.1R/2W", vpos="below")   # 2.5A 时 I^2R=0.625W，1W 余量不足
 
+# INA219 共 9 个有效引脚；VBUS 必须接入被测母线，否则总线电压寄存器无意义。
+# VBUS 取分流电阻"电源侧"(VIN_DC) 而非负载侧(SHUNT_N)：继电器断开后仍能
+# 读到真实输入电压，避免"断开->读到0V->判定安全->自动重合闸"的振荡。
 place("U2", "INA219", 274, 330, 50, 40, [
-    (1, "VIN+", "L", 28, PINLEN, 4),
-    (2, "VIN-", "L", 14, PINLEN, 4),
-    (3, "SDA", "R", 28, PINLEN, 2),
-    (4, "SCL", "R", 14, PINLEN, 2),
-    (5, "VS", "T", 26, PINLEN, 7),
-    (6, "GND", "B", 12, PINLEN, 7),
-    (7, "A0", "B", 25, PINLEN, 4),
-    (8, "A1", "B", 38, PINLEN, 4),
+    (1, "VIN+", "L", 34, PINLEN, 4),
+    (2, "VIN-", "L", 21, PINLEN, 4),
+    (3, "VBUS", "L", 8, PINLEN, 4),
+    (4, "SDA", "R", 28, PINLEN, 2),
+    (5, "SCL", "R", 14, PINLEN, 2),
+    (6, "VS", "T", 26, PINLEN, 7),
+    (7, "GND", "B", 12, PINLEN, 7),
+    (8, "A0", "B", 25, PINLEN, 4),
+    (9, "A1", "B", 38, PINLEN, 4),
 ], value="INA219")
 
 # ============================ ③ 显示 + I2C 上拉 ============================
@@ -194,6 +205,13 @@ place("R6", "R", 338, 170, 8, 16, [
     (2, "2", "B", 4, PINLEN, 4),
 ], value="1k")
 
+# MCU 复位/未初始化时 PA2 为高阻输入，10k 下拉把 Q2 基极拉到确定低电平，
+# 保证继电器在复位与上电瞬间硬件默认断开（fail-safe），不依赖软件初始化顺序。
+place("R9", "R", 360, 120, 8, 16, [
+    (1, "1", "T", 4, PINLEN, 4),
+    (2, "2", "B", 4, PINLEN, 4),
+], value="10k")
+
 place("Q2", "S8050", 380, 164, 14, 14, [
     (1, "B", "L", 6, PINLEN, 4),
     (2, "C", "T", 9, PINLEN, 4),
@@ -268,8 +286,10 @@ EXTRA_WIRES = [
 PWR = {"+5V", "+3V3", "GND"}
 
 nets = {
-    "+5V": [("J1", "VBUS"), ("U3", "VI"), ("C1", "1"), ("R1", "1"),
-            ("U2", "VIN+"), ("K1", "A1"), ("D1", "K")],
+    # ① MCU/逻辑供电：仅 USB 5V -> LDO 3V3 与继电器线圈，不串入分流电阻
+    "+5V": [("J1", "VBUS"), ("U3", "VI"), ("C1", "1"), ("K1", "A1"), ("D1", "K")],
+    # ② 被测直流回路（5–20V）：只经 R1 分流 -> K1 触点 -> 负载；INA219 在此采样
+    "VIN_DC": [("J6", "V+"), ("R1", "1"), ("U2", "VIN+"), ("U2", "VBUS")],
     "+3V3": [("U3", "VO"), ("C2", "1"), ("C3", "1"), ("U2", "VS"),
              ("U1", "VDD"), ("U1", "VDDA"), ("U1", "VBAT"),
              ("R2", "1"), ("R3", "1"), ("R4", "1"),
@@ -279,7 +299,8 @@ nets = {
             ("C3", "2"), ("U2", "GND"), ("U2", "A0"), ("U2", "A1"),
             ("U1", "VSS"), ("U1", "VSSA"), ("C4", "2"), ("C5", "2"),
             ("J2", "GND"), ("Q1", "E"), ("Q2", "E"), ("J3", "GND"),
-            ("J4", "L-"), ("J5", "GND"), ("RT1", "2"), ("R8", "2")],
+            ("J4", "L-"), ("J5", "GND"), ("RT1", "2"), ("R8", "2"),
+            ("J6", "V-"), ("R9", "2")],
 
     "SHUNT_N": [("R1", "2"), ("U2", "VIN-"), ("K1", "COM")],
     "LOAD_P": [("K1", "NO"), ("J4", "L+")],
@@ -288,7 +309,7 @@ nets = {
     "I2C_SCL": [("U1", "PB6"), ("U2", "SCL"), ("J2", "SCL"), ("R3", "2")],
     "I2C_SDA": [("U1", "PB7"), ("U2", "SDA"), ("J2", "SDA"), ("R2", "2")],
     "BUZ_CTRL": [("U1", "PA1"), ("R5", "1")],
-    "RELAY_CTRL": [("U1", "PA2"), ("R6", "1")],
+    "RELAY_CTRL": [("U1", "PA2"), ("R6", "1"), ("R9", "1")],
     "ESP_EN": [("U1", "PA3"), ("J3", "CH_PD")],
     "UART_TX": [("U1", "PA9"), ("J3", "RX")],
     "UART_RX": [("U1", "PA10"), ("J3", "TX")],
@@ -375,6 +396,24 @@ for (name, x0, y0, x1, y1) in texts:
             continue
         if not (x1 <= bx0 or bx1 <= x0 or y1 <= by0 or by1 <= y0):
             problems.append("TEXT ON BODY: %s -> %s" % (name, ref))
+
+# ---- 电气完整性：每个符号引脚必须恰好归属一个网络 ----
+# 曾经漏接 INA219 的 VBUS 引脚而未被发现，因此把覆盖检查固化为生成期断言。
+net_of = {}
+for netname, members in nets.items():
+    for key in members:
+        if key not in pins:
+            problems.append("NET REFERENCES MISSING PIN: %s.%s" % key)
+        if key in net_of:
+            problems.append("PIN IN MULTIPLE NETS: %s.%s (%s / %s)" %
+                            (key[0], key[1], net_of[key], netname))
+        net_of[key] = netname
+for key in pins:
+    if key not in net_of:
+        problems.append("UNCONNECTED PIN: %s.%s" % key)
+for netname, members in nets.items():
+    if netname not in PWR and len(members) < 2:
+        problems.append("SINGLE-PIN NET: %s" % netname)
 
 os.makedirs(os.path.dirname(OUT), exist_ok=True)
 s.save(OUT)

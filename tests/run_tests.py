@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-自动化测试入口：TC01~TC07
+自动化测试入口：TC01~TC09
 用法:  python tests/run_tests.py   （在仓库根目录）
 说明:  TC01~TC05 为寄存器级数值仿真测试（参数与固件一致）；
-       TC06/TC07 需本机装有 Arm GNU Toolchain（见 README 构建说明）。
+       TC06/TC07 需本机装有 Arm GNU Toolchain（见 README 构建说明）；
+       TC08 需本机 x86 gcc/clang（缺失则 SKIP，不算通过）；
+       TC09 校验 Altium SchDoc 文本记录与生成器网表一致。
 """
 import subprocess, sys, os, math
 
@@ -153,6 +155,15 @@ def TC08():
     assert rc == 0, "保护状态机 C 单元测试未通过"
     return "保护状态机 C 单元测试全通过（含恢复入口/闭锁/自动恢复）"
 
+def TC09():
+    script = os.path.join(ROOT, "tools", "altium", "verify_schdoc.py")
+    assert os.path.isfile(script), "缺少 tools/altium/verify_schdoc.py"
+    r = subprocess.run([sys.executable, script], capture_output=True,
+                       text=True, errors="replace")
+    out = (r.stdout + r.stderr).strip()
+    assert r.returncode == 0, out[-400:]
+    return "SchDoc 网表/标号/电源端口/引脚/导线与生成器一致"
+
 if __name__ == "__main__":
     print("=" * 64)
     print("stm32-charge-monitor 自动化测试")
@@ -165,6 +176,7 @@ if __name__ == "__main__":
     tc("TC06", "固件编译链接（Arm GCC -Wall）", TC06)
     tc("TC07", "固件体积预算（bin < 64KB）", TC07)
     tc("TC08", "保护状态机 C 单元测试（真实 protect.c）", TC08)
+    tc("TC09", "Altium SchDoc 网表一致性（文本级）", TC09)
     npass = sum(1 for r in RESULTS if r[2] == "PASS")
     nskip = sum(1 for r in RESULTS if r[2] == "SKIP")
     print("-" * 64)
