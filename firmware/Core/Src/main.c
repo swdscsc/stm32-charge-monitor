@@ -33,6 +33,14 @@ monitor_data_t g_mon = {0};
 volatile uint8_t g_recover_req = 0U;  /* 显式恢复请求（复位指令置位，主循环消费） */
 static uint8_t ina219_ok = 0;    /* INA219 在线标志 */
 static uint8_t oled_ok = 0;      /* OLED 在线标志 */
+static uint8_t s_oled_err = 0U;          /* 连续刷屏失败次数 */
+static uint32_t s_oled_retry_t = 0U;     /* OLED 掉线后低频重连时刻 */
+static uint8_t s_pwr_mismatch = 0U;      /* 硬件功率 vs V×I 连续超差计数 */
+static uint8_t s_wdg_reset = 0U;         /* 本次启动是否由独立看门狗复位 */
+
+#ifndef DISABLE_IWDG
+static IWDG_HandleTypeDef hiwdg;
+#endif
 
 /* 滑动窗口滤波: 电压/电流 (NTC 在 ntc.c 内部滤波) */
 static float v_win[FILTER_WINDOW], i_win[FILTER_WINDOW];
@@ -131,6 +139,23 @@ static void MX_USART1_Init(void)
     if (HAL_UART_Init(&huart1) != HAL_OK) Error_Handler();
 }
 
+/* ======================== 独立看门狗 (IWDG) ========================
+ * LSI≈40kHz / 64 分频 = 625Hz，Reload=1250 → 约 2s 超时。
+ * 只在 100ms 采样 + 保护判定完整跑完后喂狗；主循环卡死、I2C 挂死、
+ * NTC 转换停滞都会在 2s 内复位。复位后 MX_GPIO_Init 先把 RELAY 拉低，
+ * 原理图 R9(10k) 下拉保证 MCU 复位/高阻期间 Q2 截止、继电器硬件断开。
+ * 调试/单步时可用 -DDISABLE_IWDG 关闭。
+ */
+#ifndef DISABLE_IWDG
+static void MX_IWDG_Init(void)
+{
+    hiwdg.Instance = IWDG;
+    hiwdg.Init.Prescaler = IWDG_PRESCALER_64;
+    hiwdg.Init.Reload = 1250U;
+    if (HAL_IWDG_Init(&hiwdg) != HAL_OK) Error_Handler();
+}
+#endif
+
 /* ======================== SysTick 节拍 ======================== */
 static volatile uint32_t s_ms = 0;
 void HAL_SYSTICK_Callback(void) { s_ms++; }
@@ -146,7 +171,7 @@ static uint32_t millis(void) { return s_ms; }
  *   Page6: RELAY / INA 状态
  *   Page7: 报警提示（按需显示）
  */
-static void OLED_RenderUI(void)
+static HAL_StatusTypeDef OLED_RenderUI(void)
 {
     SSD1306_Clear();
     SSD1306_ShowString(0, 0, "CHARGE MONITOR");
@@ -170,13 +195,16 @@ static void OLED_RenderUI(void)
     if (g_mon.alarm_active) {
         SSD1306_ShowString(0, 7, "** WARNING! CHECK **");
     }
-    SSD1306_Update();
+    return SSD1306_Update();
 }
 
 /* ======================== 主函数 ======================== */
 int main(void)
 {
     HAL_Init();
+    /* 记录上电原因：IWDG 复位会在自检画面提示，便于现场判断是否曾卡死 */
+    if (__HAL_RCC_GET_FLAG(RCC_FLAG_IWDGRST)) s_wdg_reset = 1U;
+    __HAL_RCC_CLEAR_RESET_FLAGS();
     SystemClock_Config();
     MX_GPIO_Init();
     MX_I2C1_Init();
@@ -195,11 +223,18 @@ int main(void)
     ESP8266_Init(&huart1);
 #endif
 
-    /* 开机自检画面 */
-    SSD1306_Clear();
-    SSD1306_ShowString(0, 3, "SELF-TEST...");
-    SSD1306_Update();
-    HAL_Delay(1000);
+    /* 开机自检画面（OLED 掉线时不再白等 I2C 超时） */
+    if (oled_ok) {
+        SSD1306_Clear();
+        SSD1306_ShowString(0, 3, s_wdg_reset ? "WDG RESET!" : "SELF-TEST...");
+        (void)SSD1306_Update();
+        HAL_Delay(1000);
+    }
+
+#ifndef DISABLE_IWDG
+    /* 看门狗在所有初始化完成后才启动，避免初始化阶段的 HAL_Delay 触发误复位 */
+    MX_IWDG_Init();
+#endif
 
     uint32_t t_sample = 0, t_oled = 0, t_iot = 0;
 
@@ -222,6 +257,18 @@ int main(void)
                 FilterPush(v, i);
                 FilterGet(&g_mon.bus_voltage, &g_mon.current);
                 g_mon.power = g_mon.bus_voltage * g_mon.current;
+
+                /* INA219 内部 power 寄存器 (硬件 Vbus×I) 与本次原始 V×I 交叉校验。
+                   用未滤波的 v/i 对齐时基；连续 5 周期超差才判传感器故障，
+                   避免窗口滤波造成的瞬时偏差误动。可发现标定寄存器被改写、
+                   分流电阻异常、读数错帧等问题。 */
+                float p_raw = v * i;
+                if (fabsf(p - p_raw) > 0.30f + 0.20f * fabsf(p_raw)) {
+                    if (s_pwr_mismatch < 5U) s_pwr_mismatch++;
+                } else {
+                    s_pwr_mismatch = 0U;
+                }
+                if (s_pwr_mismatch >= 5U) g_mon.sensor_fault = 1U;
             } else {
                 g_mon.sensor_fault = 1U; /* INA219失联：本周期立即进入故障切断 */
                 ina219_ok = 0U;
@@ -235,12 +282,37 @@ int main(void)
                 g_mon.sensor_fault = 1U; /* NTC无效：禁止使用旧温度继续供电 */
             }
             Protect_Update(&g_mon);
+
+#ifndef DISABLE_IWDG
+            /* 健康完成一个完整采样周期才喂狗，绝不无条件喂 */
+            (void)HAL_IWDG_Refresh(&hiwdg);
+#endif
         }
 
         /* ---- 500ms: 显示刷新 ---- */
         if (now - t_oled >= OLED_REFRESH_MS) {
             t_oled = now;
-            if (oled_ok) OLED_RenderUI();
+            if (oled_ok) {
+                if (OLED_RenderUI() == HAL_OK) {
+                    s_oled_err = 0U;
+                } else if (++s_oled_err >= 3U) {
+                    /* 连续 3 次刷屏失败判定掉线，停止 500ms 节拍上的重试，
+                       避免 OLED 缺失时反复吃 I2C 超时而破坏保护节拍 */
+                    oled_ok = 0U;
+                    s_oled_retry_t = now;
+                }
+            }
+        }
+
+        /* OLED 掉线后每 5s 低频探活一次；先用 IsDeviceReady 快速探测，
+           只有确认在线才跑完整 Init（否则 I2C 超时可能超过看门狗窗口） */
+        if (!oled_ok && (uint32_t)(now - s_oled_retry_t) >= 5000U) {
+            s_oled_retry_t = now;
+            if (HAL_I2C_IsDeviceReady(&hi2c1, SSD1306_ADDR, 1, 20) == HAL_OK &&
+                SSD1306_Init(&hi2c1) == HAL_OK) {
+                oled_ok = 1U;
+                s_oled_err = 0U;
+            }
         }
 
         /* ---- 1000ms: 物联网上传 ---- */

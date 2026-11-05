@@ -56,7 +56,7 @@ HAL_SRC = ["stm32f1xx_hal.c", "stm32f1xx_hal_cortex.c", "stm32f1xx_hal_rcc.c",
     "stm32f1xx_hal_rcc_ex.c", "stm32f1xx_hal_gpio.c", "stm32f1xx_hal_flash.c",
     "stm32f1xx_hal_flash_ex.c", "stm32f1xx_hal_pwr.c", "stm32f1xx_hal_i2c.c",
     "stm32f1xx_hal_adc.c", "stm32f1xx_hal_adc_ex.c", "stm32f1xx_hal_uart.c",
-    "stm32f1xx_hal_dma.c"]
+    "stm32f1xx_hal_dma.c", "stm32f1xx_hal_iwdg.c"]
 APP_SRC = ["main.c", "ina219.c", "ntc.c", "ssd1306.c", "protect.c", "protect_hal.c", "esp8266.c"]
 SYS_SRC = [os.path.join(DEVICE, "Source", "Templates", "system_stm32f1xx.c")]
 STARTUP = os.path.join(DEVICE, "Source", "Templates", "gcc", "startup_stm32f103xb.s")

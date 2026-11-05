@@ -153,21 +153,29 @@ HAL_StatusTypeDef SSD1306_Init(I2C_HandleTypeDef *hi2c)
 void SSD1306_Clear(void) { memset(s_vram, 0x00, sizeof(s_vram)); }
 void SSD1306_Fill(uint8_t pattern) { memset(s_vram, pattern, sizeof(s_vram)); }
 
-void SSD1306_Update(void)
+HAL_StatusTypeDef SSD1306_Update(void)
 {
-    /* 水平寻址模式下一次性写入整帧 */
+    /* 水平寻址模式下一次性写入整帧。
+       任何一次传输失败立即返回：OLED 掉线时不再连续跑完 8 页 × 100ms 超时。 */
+    HAL_StatusTypeDef st;
+    if (s_hi2c == NULL) return HAL_ERROR;
+
     uint8_t cmd[] = {0x22, 0x00, 0x07};   /* 页地址 0~7 */
     uint8_t cmd2[] = {0x21, 0x00, 0x7F};  /* 列地址 0~127 */
-    HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, cmd, 3, 100);
-    HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, cmd2, 3, 100);
+    st = HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, cmd, 3, 100);
+    if (st != HAL_OK) return st;
+    st = HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, cmd2, 3, 100);
+    if (st != HAL_OK) return st;
 
     uint8_t buf[SSD1306_WIDTH + 1];
     buf[0] = 0x40;                        /* D/C#=1 -> 数据 */
     for (uint8_t page = 0; page < 8; page++) {
         memcpy(&buf[1], &s_vram[page * SSD1306_WIDTH], SSD1306_WIDTH);
-        HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, buf,
-                                SSD1306_WIDTH + 1, 100);
+        st = HAL_I2C_Master_Transmit(s_hi2c, SSD1306_ADDR, buf,
+                                     SSD1306_WIDTH + 1, 100);
+        if (st != HAL_OK) return st;
     }
+    return HAL_OK;
 }
 
 void SSD1306_DrawPixel(uint8_t x, uint8_t y, uint8_t color)
