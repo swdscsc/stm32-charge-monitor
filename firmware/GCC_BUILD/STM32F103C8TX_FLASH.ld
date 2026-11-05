@@ -67,18 +67,14 @@ SECTIONS
     _ebss = .;
   } >RAM
 
-  .heap (COPY) :
+  /* 用户堆/栈区域：end / _end 标记堆起点，供 newlib(_sbrk) 使用，否则链接报
+     "undefined reference to 'end'"。同时预留最小堆+栈，避免越界覆盖变量。 */
+  ._user_heap_stack :
   {
     . = ALIGN(4);
-    *(.heap)
-    . = . + _Min_Heap_Size;
-    . = ALIGN(4);
-  } >RAM
-
-  ._user_heap_stack (COPY) :
-  {
-    . = ALIGN(4);
+    PROVIDE(end = .);
+    PROVIDE(_end = .);
     . = . + _Min_Heap_Size + _Min_Stack_Size;
-    . = ALIGN(4);
+    . = ALIGN(8);
   } >RAM
 }

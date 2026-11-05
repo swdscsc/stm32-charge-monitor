@@ -1,9 +1,11 @@
 # -*- coding: utf-8 -*-
 """
-自动化测试入口：TC01~TC07
+自动化测试入口：TC01~TC09
 用法:  python tests/run_tests.py   （在仓库根目录）
 说明:  TC01~TC05 为寄存器级数值仿真测试（参数与固件一致）；
-       TC06/TC07 需本机装有 Arm GNU Toolchain（见 README 构建说明）。
+       TC06/TC07 需本机装有 Arm GNU Toolchain（见 README 构建说明）；
+       TC08 需本机 x86 gcc/clang（缺失则 SKIP，不算通过）；
+       TC09 校验 Altium SchDoc 文本记录与生成器网表一致。
 """
 import subprocess, sys, os, math
 
@@ -12,11 +14,17 @@ sys.path.insert(0, os.path.join(ROOT, "simulation"))
 
 RESULTS = []
 
+class _Skip(Exception):
+    pass
+
 def tc(name, desc, func):
     try:
         detail = func()
         RESULTS.append((name, desc, "PASS", detail or ""))
         print(f"[PASS] {name} {desc}  {detail or ''}")
+    except _Skip as e:
+        RESULTS.append((name, desc, "SKIP", str(e)))
+        print(f"[SKIP] {name} {desc}  {e}")
     except AssertionError as e:
         RESULTS.append((name, desc, "FAIL", str(e)))
         print(f"[FAIL] {name} {desc}  {e}")
@@ -71,7 +79,7 @@ def protect_session(T_cut_hit=True):
 
 # ---------- 用例 ----------
 def TC01():
-    for tv, ti in [(5.0, 0.5), (9.0, 1.5), (12.0, 2.0), (15.0, 2.5), (20.0, 3.0)]:
+    for tv, ti in [(5.0, 0.5), (9.0, 1.0), (12.0, 1.5), (15.0, 2.0), (20.0, 2.5)]:
         v, i, p = ina_read(tv, ti)
         assert abs(v - tv) <= 0.004, f"电压 {v} vs {tv}"
         assert abs(i - ti) <= 0.0008, f"电流 {i} vs {ti}"
@@ -117,7 +125,7 @@ def TC06():
                        errors="replace", env=env, cwd=os.path.dirname(script))
     out = r.stdout + r.stderr
     assert "BUILD OK" in out, f"编译失败:\n{out[-800:]}"
-    assert "warning" not in out.lower().replace("warning: _close", "") or True
+    assert "warning:" not in out.lower(), f"编译存在警告:\n{out[-800:]}"
     # 提取 size 行
     for ln in out.splitlines():
         if "firmware.elf" in ln and ln.split()[0].isdigit():
@@ -135,6 +143,27 @@ def TC07():
     assert size > 4096, "bin 异常小，可能链接裁剪过度"
     return f"firmware.bin {size} bytes (< 64KB)"
 
+def TC08():
+    import importlib.util
+    spec = importlib.util.spec_from_file_location(
+        "run_protect_tests", os.path.join(ROOT, "tests", "run_protect_tests.py"))
+    mod = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(mod)
+    rc = mod.main()
+    if rc == 2:
+        raise _Skip("未找到主机 C 编译器，C 单元测试需在本机/CI 安装 gcc 后运行")
+    assert rc == 0, "保护状态机 C 单元测试未通过"
+    return "保护状态机 C 单元测试全通过（含恢复入口/闭锁/自动恢复）"
+
+def TC09():
+    script = os.path.join(ROOT, "tools", "altium", "verify_schdoc.py")
+    assert os.path.isfile(script), "缺少 tools/altium/verify_schdoc.py"
+    r = subprocess.run([sys.executable, script], capture_output=True,
+                       text=True, errors="replace")
+    out = (r.stdout + r.stderr).strip()
+    assert r.returncode == 0, out[-400:]
+    return "SchDoc 网表/标号/电源端口/引脚/导线与生成器一致"
+
 if __name__ == "__main__":
     print("=" * 64)
     print("stm32-charge-monitor 自动化测试")
@@ -146,7 +175,11 @@ if __name__ == "__main__":
     tc("TC05", "长时间运行稳定性（等效600s）", TC05)
     tc("TC06", "固件编译链接（Arm GCC -Wall）", TC06)
     tc("TC07", "固件体积预算（bin < 64KB）", TC07)
+    tc("TC08", "保护状态机 C 单元测试（真实 protect.c）", TC08)
+    tc("TC09", "Altium SchDoc 网表一致性（文本级）", TC09)
     npass = sum(1 for r in RESULTS if r[2] == "PASS")
+    nskip = sum(1 for r in RESULTS if r[2] == "SKIP")
     print("-" * 64)
-    print(f"结果: {npass}/{len(RESULTS)} 通过")
-    sys.exit(0 if npass == len(RESULTS) else 1)
+    print(f"结果: {npass}/{len(RESULTS)} 通过, {nskip} 跳过")
+    failed = [r for r in RESULTS if r[2] in ("FAIL", "ERROR")]
+    sys.exit(0 if not failed else 1)

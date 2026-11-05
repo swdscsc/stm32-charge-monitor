@@ -15,7 +15,7 @@
 HAL_StatusTypeDef SSD1306_Init(I2C_HandleTypeDef *hi2c);
 void              SSD1306_Clear(void);
 void              SSD1306_Fill(uint8_t pattern);
-void              SSD1306_Update(void);                    /* 刷显存到屏 */
+HAL_StatusTypeDef SSD1306_Update(void);                  /* 刷显存到屏，返回 I2C 状态 */
 void              SSD1306_DrawPixel(uint8_t x, uint8_t y, uint8_t color);
 void              SSD1306_ShowChar(uint8_t col, uint8_t page, char ch);
 void              SSD1306_ShowString(uint8_t col, uint8_t page, const char *str);

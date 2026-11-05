@@ -14,6 +14,7 @@
 #define HAL_ADC_MODULE_ENABLED
 #define HAL_UART_MODULE_ENABLED
 #define HAL_DMA_MODULE_ENABLED
+#define HAL_IWDG_MODULE_ENABLED   /* 独立看门狗：主循环健康度监控 */
 
 /* 外部晶振 8MHz */
 #define HSE_VALUE    8000U
@@ -36,6 +37,7 @@
 #include "stm32f1xx_hal_i2c.h"
 #include "stm32f1xx_hal_adc.h"
 #include "stm32f1xx_hal_uart.h"
+#include "stm32f1xx_hal_iwdg.h"
 
 #define assert_param(expr) ((void)0U)
 

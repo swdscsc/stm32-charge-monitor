@@ -1,8 +1,13 @@
-# ARM GCC 编译脚本（在无 Keil/STM32CubeIDE 的机器上验证固件可编译）
-# 用法: 将本文件放到 firmware/GCC_BUILD 下，arm-gcc 解压到 E:/rj666/stm32-build/arm-gcc，
-#       CubeF1 解压到 E:/rj666/stm32-build/STM32CubeF1-master
-CROSS   = E:/rj666/stm32-build/arm-gcc/bin/arm-none-eabi-
-CUBE    = E:/rj666/stm32-build/STM32CubeF1-master/Drivers
+# ARM GCC 备用构建脚本（推荐优先使用 build.py，它是已验证路径）
+# 依赖路径可用环境变量覆盖，默认值与 build.py 一致：
+#   ARM_GCC_BIN / STM32_HAL_ROOT / CMSIS_ROOT
+ARM_GCC_BIN ?= E:/rj666/stm32-build/arm-gcc/bin
+HAL_ROOT    ?= $(STM32_HAL_ROOT)
+ifeq ($(HAL_ROOT),)
+HAL_ROOT    := E:/rj666/stm32-build/STM32F1xx_HAL_Driver
+endif
+CMSIS_ROOT  ?= E:/rj666/stm32-build/CMSIS
+CROSS   = $(ARM_GCC_BIN)/arm-none-eabi-
 CORE    = ../Core
 
 CC      = $(CROSS)gcc
@@ -10,22 +15,25 @@ OBJCOPY = $(CROSS)objcopy
 SIZE    = $(CROSS)size
 
 CPU     = -mcpu=cortex-m3 -mthumb -DSTM32F103xB -DUSE_HAL_DRIVER
-CFLAGS  = $(CPU) -Os -Wall -ffreestanding -fdata-sections -ffunction-sections \
-          -I$(CORE)/Inc -I$(CUBE)/STM32F1xx_HAL_Driver/Inc \
-          -I$(CUBE)/CMSIS/Device/ST/STM32F1xx/Include \
-          -I$(CUBE)/CMSIS/Include -I.
-LDFLAGS = $(CPU) -T STM32F103C8TX_FLASH.ld --specs=nano.specs \
+CFLAGS  = $(CPU) -std=c99 -Os -Wall -Wextra -ffreestanding \
+          -fdata-sections -ffunction-sections \
+          -I$(CORE)/Inc -I$(HAL_ROOT)/Inc \
+          -I$(CMSIS_ROOT)/Device/ST/STM32F1xx/Include \
+          -I$(CMSIS_ROOT)/Include -I.
+LDFLAGS = $(CPU) -T STM32F103C8TX_FLASH.ld --specs=nano.specs --specs=nosys.specs \
           -Wl,--gc-sections -Wl,-Map=firmware.map
+# 调试/单步时可加 -DDISABLE_IWDG 关闭独立看门狗
 
 HAL_SRC = stm32f1xx_hal.c stm32f1xx_hal_cortex.c stm32f1xx_hal_rcc.c \
           stm32f1xx_hal_rcc_ex.c stm32f1xx_hal_gpio.c stm32f1xx_hal_flash.c \
           stm32f1xx_hal_flash_ex.c stm32f1xx_hal_pwr.c stm32f1xx_hal_i2c.c \
           stm32f1xx_hal_adc.c stm32f1xx_hal_adc_ex.c stm32f1xx_hal_uart.c \
-          stm32f1xx_hal_uart_ex.c
-APP_SRC = main.c ina219.c ntc.c ssd1306.c protect.c esp8266.c
+          stm32f1xx_hal_dma.c stm32f1xx_hal_iwdg.c
+APP_SRC = main.c ina219.c ntc.c ssd1306.c protect.c protect_hal.c esp8266.c
 
-SRCS  = $(addprefix $(CUBE)/STM32F1xx_HAL_Driver/Src/,$(HAL_SRC)) \
-        $(addprefix $(CUBE)/CMSIS/Device/ST/STM32F1xx/Source/Templates/gcc/,system_stm32f1xx.c startup_stm32f103xb.s) \
+SRCS  = $(addprefix $(HAL_ROOT)/Src/,$(HAL_SRC)) \
+        $(CMSIS_ROOT)/Device/ST/STM32F1xx/Source/Templates/system_stm32f1xx.c \
+        $(CMSIS_ROOT)/Device/ST/STM32F1xx/Source/Templates/gcc/startup_stm32f103xb.s \
         $(addprefix $(CORE)/Src/,$(APP_SRC))
 OBJS  = $(SRCS:.c=.o) $(SRCS:.s=.o)
 
