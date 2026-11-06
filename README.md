@@ -32,7 +32,7 @@ stm32-charge-monitor/
 │   ├── sim_core.py          换算验证 + 保护场景仿真 + 测试曲线生成
 │   └── fig_*.py             论文/展示图生成脚本
 ├── tests/
-│   └── run_tests.py         TC01~TC09 自动化测试入口（含 protect.c 真实 C 单测与 SchDoc 网表校验）
+│   └── run_tests.py         TC01~TC09 自动化测试入口（含 protect.c 真实 C 单测与 SchDoc 双画法校验）
 ├── figures/                 架构/接线/流程/界面/测试曲线图
 └── docs/screenshots/        编译、测试、烧录工具的真实运行截图
 ```
@@ -81,7 +81,7 @@ python tests/run_current_checks.py      # 执行数值测试；编译用例需�
 | TC01–TC05 | 数值模型 / 仿真 | 本机已通过；**不等同于 C 固件或实物测试** |
 | TC06–TC07 | Arm GCC 编译与体积检查 | 本机已通过（0 警告，`firmware.bin` < 64KB） |
 | TC08 | `protect.c` 真实 C 代码单元测试 | 已用 ARM GCC `-Wall -Wextra` 编译检查通过；本机无 x86 gcc/clang，实际执行需 CI 或装有原生编译器的机器，本机报 SKIP |
-| TC09 | Altium SchDoc 网表 + 电气热点一致性（文本级） | 本机已通过：25 网络 / 99 引脚 / 101 导线 / 54 标号 / 43 电源端口与生成器对齐，且 99 个引脚热点 + 97 个标号/端口全部落在导线端点 |
+| TC09 | Altium SchDoc 网表 + 电气热点 + 双画法回归（文本级） | 本机已通过：25 网络 / 99 引脚 / 101 导线 / 54 标号 / 43 电源端口与生成器对齐，99 个引脚热点 + 97 个标号/端口全部落在导线端点；内置 stub/direct 正反例回归 5/5，另用 7 图纸 OLE 工程交叉验证 `direct` 判定与悬空诊断 |
 | Altium Compile | 原理图工程编译 | Rev.B 本机 Altium 17.0 实测 **`Compile successful, no errors found.`**（0 error）；Rev.C 已修复 97 条 Floating 警告的引脚热点根因并静态验证，**GUI 复编译待做**；ERC 未执行 |
 | HT-1–HT-5 | 实物测量 | 样机完成后执行，**尚未开展** |
 

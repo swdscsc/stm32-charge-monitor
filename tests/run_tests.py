@@ -5,7 +5,7 @@
 说明:  TC01~TC05 为寄存器级数值仿真测试（参数与固件一致）；
        TC06/TC07 需本机装有 Arm GNU Toolchain（见 README 构建说明）；
        TC08 需本机 x86 gcc/clang（缺失则 SKIP，不算通过）；
-       TC09 校验 Altium SchDoc 文本记录与生成器网表一致。
+       TC09 校验 Altium SchDoc 网表/电气热点，并回归 stub 与 direct 两种连接画法。
 """
 import subprocess, sys, os, math
 
@@ -162,7 +162,7 @@ def TC09():
                        text=True, errors="replace")
     out = (r.stdout + r.stderr).strip()
     assert r.returncode == 0, out[-400:]
-    return "SchDoc 网表/标号/电源端口/引脚/导线与生成器一致"
+    return "SchDoc 网表/电气热点一致，stub+direct 画法回归 5/5 通过"
 
 if __name__ == "__main__":
     print("=" * 64)
@@ -176,7 +176,7 @@ if __name__ == "__main__":
     tc("TC06", "固件编译链接（Arm GCC -Wall）", TC06)
     tc("TC07", "固件体积预算（bin < 64KB）", TC07)
     tc("TC08", "保护状态机 C 单元测试（真实 protect.c）", TC08)
-    tc("TC09", "Altium SchDoc 网表一致性（文本级）", TC09)
+    tc("TC09", "Altium SchDoc 网表 + 电气热点 + 双画法回归（文本级）", TC09)
     npass = sum(1 for r in RESULTS if r[2] == "PASS")
     nskip = sum(1 for r in RESULTS if r[2] == "SKIP")
     print("-" * 64)
